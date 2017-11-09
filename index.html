@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>three.js webgl - AMF</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            font-family: Monospace;
+            background-color: #000000;
+            margin: 0px;
+            overflow: hidden;
+        }
+
+        #info {
+            color: #fff;
+            position: absolute;
+            top: 0px;
+            width: 300px;
+            text-align: center;
+            z-index: 100;
+            display: block;
+
+        }
+
+        a {
+            color: skyblue
+        }
+
+        .button {
+            background: #999;
+            color: #eee;
+            padding: 0.2em 0.5em;
+            cursor: pointer
+        }
+
+        .highlight {
+            background: orange;
+            color: #fff;
+        }
+
+        span {
+            display: inline-block;
+            width: 60px;
+            float: left;
+            text-align: center;
+        }
+    </style>
+    <script src="/libs/js/jquery.min.js"></script>
+    <script src="https://threejs.org/build/three.js"></script>
+    <script src="/libs/js/three-dxf.js"></script>
+    <script src="/libs/js/dxf-parser.js"></script>
+    <script src="https://threejs.org/examples/js/Detector.js"></script>
+    <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://threejs.org/examples/js/controls/TransformControls.js"></script>
+
+</head>
+<body>
+<div id="info">
+    <div>
+        <p>
+            "W" translate | "E" rotate | "R" scale | "+" increase size | "-" decrease size<br/>
+            Press "Q" to toggle world/local space, keep "Ctrl" down to snap to grid<br/>
+        </p>
+
+        <div role="form">
+            <div>
+                <input type="file" accept=".dxf" id="dxf" name="file">
+
+                <div class="progress progress-striped" style="width: 300px;">
+                    <div id="file-progress-bar" class="progress-bar progress-bar-success" role="progressbar"
+                         style="width: 0">
+                    </div>
+                </div>
+                <div id="file-description" class="help-block"></div>
+            </div>
+            <table id="models"></table>
+        </div>
+        <div id="cad-view">
+
+        </div>
+    </div>
+</div>
+
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.4/css/bootstrap.min.css">
+
+
+<script>
+
+    if (!Detector.webgl) Detector.addGetWebGLMessage();
+
+
+    var progress = document.getElementById('file-progress-bar');
+    var modelsTable = document.getElementById('models');
+    var $progress = $('.progress');
+
+
+    // Setup the dnd listeners.
+    var dropZone = $('.drop-zone');
+    dropZone.on('dragover', handleDragOver, false);
+    dropZone.on('drop', onFileSelected, false);
+
+    document.getElementById('dxf').addEventListener('change', onFileSelected, false);
+
+    var models = [];
+
+    var filesCount = 0;
+
+    function onFileSelected(evt) {
+        progress.style.width = '0%';
+        progress.textContent = '0%';
+
+
+        var file = evt.target.files[0];
+
+
+        console.log(file);
+
+        var model = {
+            group: null,
+            name: file.name + "  " + file.size + "bytes",
+        };
+
+        models.push(model);
+
+//        var output = [];
+//        output.push('<li><strong>', encodeURI(file.name), '</strong> (', file.type || 'n/a', ') - ',
+//                file.size, ' bytes, last modified: ',
+//                file.lastModifiedDate ? file.lastModifiedDate.toLocaleDateString() : 'n/a',
+//                '</li>');
+//        document.getElementById('file-description').innerHTML = '<ul>' + output.join('') + '</ul>';
+
+        $progress.addClass('loading');
+
+        var reader = new FileReader();
+        reader.onprogress = updateProgress;
+        reader.onloadend = function (event) {
+            onSuccess(event, model);
+        }
+        reader.onabort = abortUpload;
+        reader.onerror = errorHandler;
+        reader.readAsText(file);
+        updateModelsList()
+    }
+
+
+    function updateModelsList() {
+
+        modelsTable.innerHTML = "";
+
+
+        models.forEach(function (model) {
+
+            var tr = $("<tr></tr>").mouseover(function () {
+
+                console.log('mouseover', model.name);
+                control.attach(model.group);
+                render();
+            });
+            tr.append($("<td></td>").text(model.name));
+            var deleteBtn = $("<tr>x</tr>");
+            tr.append(deleteBtn);
+            $(modelsTable).append(tr);
+
+        })
+
+    }
+
+    function abortUpload() {
+        console.log('Aborted read!')
+    }
+
+    function errorHandler(evt) {
+        switch (evt.target.error.code) {
+            case evt.target.error.NOT_FOUND_ERR:
+                alert('File Not Found!');
+                break;
+            case evt.target.error.NOT_READABLE_ERR:
+                alert('File is not readable');
+                break;
+            case evt.target.error.ABORT_ERR:
+                break; // noop
+            default:
+                alert('An error occurred reading this file.');
+        }
+    }
+
+    function handleDragOver(evt) {
+        evt.stopPropagation();
+        evt.preventDefault();
+        evt.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
+    }
+
+    function updateProgress(evt) {
+        console.log('progress');
+        console.log(Math.round((evt.loaded / evt.total) * 100));
+        if (evt.lengthComputable) {
+            var percentLoaded = Math.round((evt.loaded / evt.total) * 100);
+            if (percentLoaded < 100) {
+                progress.style.width = percentLoaded + '%';
+                progress.textContent = percentLoaded + '%';
+            }
+        }
+    }
+
+    function onSuccess(evt, model) {
+        var fileReader = evt.target;
+        if (fileReader.error) return console.log("error onloadend!?");
+        progress.style.width = '100%';
+        progress.textContent = '100%';
+        setTimeout(function () {
+            $progress.removeClass('loading');
+        }, 2000);
+        var parser = new window.DxfParser();
+        var dxf = parser.parseSync(fileReader.result);
+        var group = new THREE.Group();
+        var material = new THREE.LineBasicMaterial({
+            color: 0x0000ff
+        });
+
+        dxf.entities.forEach(function (entity) {
+            if (entity.type == "POLYLINE" || entity.type == "LINE") {
+                var geometry = new THREE.Geometry();
+                entity.vertices.forEach(function (vertex) {
+                    geometry.vertices.push(new THREE.Vector3(vertex.x, vertex.y, 0));
+                });
+                var line = new THREE.Line(geometry, material);
+                group.add(line);
+            } else if (entity.type === 'CIRCLE' || entity.type === 'ARC') {
+
+                var geometry = new THREE.CircleGeometry(entity.radius, 32, entity.startAngle, entity.angleLength);
+                geometry.vertices.shift();
+                circle = new THREE.Line(geometry, material);
+                circle.position.x = entity.center.x;
+                circle.position.y = entity.center.y;
+                circle.position.z = entity.center.z;
+                group.add(circle);
+
+            } else {
+                console.log(entity.type);
+            }
+        })
+
+        scene.add(group);
+//
+        model.group = group;
+
+        console.log(models);
+
+        render();
+    }
+
+    var camera, scene, renderer, control;
+
+    init();
+
+    function init() {
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x999999);
+
+        scene.add(new THREE.AmbientLight(0x999999));
+
+        camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000);
+        camera.position.set(345 / 2, 175 / 2, 200);
+        scene.add(camera);
+
+//        var helper = new THREE.GridHelper(160, 10);
+//        helper.rotation.x = Math.PI / 2;
+//        scene.add(helper);
+
+
+        var planeW = 345; // pixels
+        var planeH = 175; // pixels
+        var plane = new THREE.Mesh(
+//                new THREE.PlaneGeometry( planeW*numW, planeH*numH, planeW, planeH ),
+                new THREE.PlaneGeometry(planeW, planeH, (345 / 5), (175 / 5)),
+                new THREE.MeshBasicMaterial({
+                    color: 0x000000,
+                    wireframe: true
+                })
+        );
+
+        plane.position.set((planeW / 2), (planeH / 2), 0);
+        scene.add(plane);
+
+        renderer = new THREE.WebGLRenderer({antialias: true});
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        var controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.addEventListener('change', render);
+        controls.target.set(0, 1.2, 2);
+        controls.target.x = camera.position.x;
+        controls.target.y = camera.position.y;
+        controls.update();
+
+        control = new THREE.TransformControls(camera, renderer.domElement);
+        control.addEventListener('change', render);
+        scene.add(control);
+        window.addEventListener('keydown', function (event) {
+            switch (event.keyCode) {
+                case 81: // Q
+                    control.setSpace(control.space === "local" ? "world" : "local");
+                    break;
+                case 17: // Ctrl
+                    control.setTranslationSnap(100);
+                    control.setRotationSnap(THREE.Math.degToRad(15));
+                    break;
+                case 87: // W
+                    control.setMode("translate");
+                    break;
+                case 69: // E
+                    control.setMode("rotate");
+                    break;
+                case 82: // R
+                    control.setMode("scale");
+                    break;
+                case 187:
+                case 107: // +, =, num+
+                    control.setSize(control.size + 0.1);
+                    break;
+                case 189:
+                case 109: // -, _, num-
+                    control.setSize(Math.max(control.size - 0.1, 0.1));
+                    break;
+            }
+        });
+        window.addEventListener('keyup', function (event) {
+            switch (event.keyCode) {
+                case 17: // Ctrl
+                    control.setTranslationSnap(null);
+                    control.setRotationSnap(null);
+                    break;
+            }
+        });
+
+        window.addEventListener('resize', onWindowResize, false);
+        render();
+
+    }
+
+    function onWindowResize() {
+
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        render();
+
+    }
+
+    function render() {
+
+        renderer.render(scene, camera);
+
+    }
+
+</script>
+</body>
+</html>
