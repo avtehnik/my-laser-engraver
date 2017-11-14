@@ -17,7 +17,6 @@
             position: absolute;
             top: 0px;
             width: 300px;
-            text-align: center;
             z-index: 100;
             display: block;
 
@@ -39,11 +38,24 @@
             color: #fff;
         }
 
+        .legend {
+            position: absolute;
+            background-color: azure;
+        }
+
         span {
             display: inline-block;
             width: 60px;
             float: left;
             text-align: center;
+        }
+
+        #models td {
+            cursor: pointer;
+        }
+
+        #g-code {
+            color: black;
         }
     </style>
     <script src="/libs/js/jquery.min.js"></script>
@@ -53,94 +65,121 @@
     <script src="https://threejs.org/examples/js/Detector.js"></script>
     <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
     <script src="https://threejs.org/examples/js/controls/TransformControls.js"></script>
+    <script src="https://threejs.org/examples/js/exporters/OBJExporter.js"></script>
 
 </head>
-<body>
+<body id="dropzone">
+<div class="legend">
+    W-translate | E-rotate | R-scale | "Q" to toggle world/local space, keep "
+    Ctrl - snap <input type="file" accept=".dxf" id="dxf" name="file"><br/>
+
+</div>
 <div id="info">
-    <div>
-        <p>
-            "W" translate | "E" rotate | "R" scale | "+" increase size | "-" decrease size<br/>
-            Press "Q" to toggle world/local space, keep "Ctrl" down to snap to grid<br/>
-        </p>
+    <div role="form">
 
-        <div role="form">
-            <div>
-                <input type="file" accept=".dxf" id="dxf" name="file">
-
-                <div class="progress progress-striped" style="width: 300px;">
-                    <div id="file-progress-bar" class="progress-bar progress-bar-success" role="progressbar"
-                         style="width: 0">
-                    </div>
-                </div>
-                <div id="file-description" class="help-block"></div>
-            </div>
-            <table id="models"></table>
-        </div>
-        <div id="cad-view">
-
-        </div>
+        <table id="models"></table>
     </div>
 </div>
+<div style="position: absolute; right: 0">
+    <textarea id="g-code" style="width:160px;height: 100px;"></textarea><br>
+    <button onclick="return exportGcode();">export</button>
 
-<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.4/css/bootstrap.min.css">
+</div>
 
 
 <script>
 
     if (!Detector.webgl) Detector.addGetWebGLMessage();
 
+    var camera, scene, renderer, control, textarea;
+    var importedShapes = {};
 
-    var progress = document.getElementById('file-progress-bar');
+    var gcodeExporter = {
+        'circle': function (shape, settings) {
+            var str = "";
+            var ofx = shape.center.x - shape.radius;
+            str += "G0 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " F" + settings.speed + " \n";
+            str += "M5\n";
+            str += "G17 G2 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " I" + shape.radius.toFixed(3) + " J0.000 F" + settings.workSpeed + " \n";
+            str += "M3\n";
+            return str;
+        },
+        'arc': function (shape, settings) {
+            var Theta1 = vectorAngle(shape.center, shape.from);
+            var I = (shape.center.x - (Math.abs(shape.radius) * Math.cos(Theta1 * Math.PI / 180))) - shape.center.x;
+            var J = (shape.center.y - (Math.abs(shape.radius) * Math.sin(Theta1 * Math.PI / 180))) - shape.center.y;
+
+            var str = "";
+            str += "G0 X" + shape.from.x.toFixed(3) + " Y" + shape.from.y.toFixed(3) + " F" + settings.speed + " \n";
+            str += "M3\n";
+            str += (shape.radius > 0 ? "G3" : "G2") + " X" + shape.to.x.toFixed(3) + " Y" + shape.to.y.toFixed(3) + "  I" + I.toFixed(3) + " J" + J.toFixed(3) + "  F" + settings.workSpeed + " \n";
+            str += "M5\n";
+            return str;
+
+
+        },
+        'line': function (shape, settings) {
+            return "";
+
+            var x = point['2d_x'] + offsetX;
+            var y = point['2d_y'] + offsetY;
+
+            textarea.value += "G" + (index == 0 ? 0 : 1) + " X" + x.toFixed(3) + " Y" + y.toFixed(3) + "\r\n";
+
+        }
+    };
+
+
+    init();
+
+
     var modelsTable = document.getElementById('models');
-    var $progress = $('.progress');
 
 
     // Setup the dnd listeners.
     var dropZone = $('.drop-zone');
     dropZone.on('dragover', handleDragOver, false);
-    dropZone.on('drop', onFileSelected, false);
+    dropZone.on('drop', onFilesSelected, false);
 
-    document.getElementById('dxf').addEventListener('change', onFileSelected, false);
+    document.getElementById('dxf').addEventListener('change', onFilesSelected, false);
 
     var models = [];
-
     var filesCount = 0;
 
-    function onFileSelected(evt) {
-        progress.style.width = '0%';
-        progress.textContent = '0%';
+    function onFileSelected(file) {
+        if (file.type.match('\.dxf') || file.name.match('\.dxf')) {
+            var model = {
+                group: null,
+                name: file.name,
+            };
 
-
-        var file = evt.target.files[0];
-
-
-        console.log(file);
-
-        var model = {
-            group: null,
-            name: file.name + "  " + file.size + "bytes",
-        };
-
-        models.push(model);
-
-//        var output = [];
-//        output.push('<li><strong>', encodeURI(file.name), '</strong> (', file.type || 'n/a', ') - ',
-//                file.size, ' bytes, last modified: ',
-//                file.lastModifiedDate ? file.lastModifiedDate.toLocaleDateString() : 'n/a',
-//                '</li>');
-//        document.getElementById('file-description').innerHTML = '<ul>' + output.join('') + '</ul>';
-
-        $progress.addClass('loading');
-
-        var reader = new FileReader();
-        reader.onprogress = updateProgress;
-        reader.onloadend = function (event) {
-            onSuccess(event, model);
+            models.push(model);
+            var reader = new FileReader();
+            reader.onloadend = function (event) {
+                onSuccess(event, model);
+            }
+            reader.onabort = abortUpload;
+            reader.onerror = errorHandler;
+            reader.readAsText(file);
         }
-        reader.onabort = abortUpload;
-        reader.onerror = errorHandler;
-        reader.readAsText(file);
+    }
+
+
+    function onFilesSelected(evt) {
+        Array.prototype.forEach.call(evt.target.files, function (file) {
+            onFileSelected(file);
+        });
         updateModelsList()
+    }
+
+    function getEntry(fullPath, callback) {
+        var fsUrl = fs.root.toURL() + fullPath;
+        window.resolveLocalFileSystemURL(fsUrl, function (entry) {
+            if (entry.isDirectory) {
+                cwd = entry;
+            }
+            callback(entry);
+        });
     }
 
 
@@ -151,9 +190,7 @@
 
         models.forEach(function (model) {
 
-            var tr = $("<tr></tr>").mouseover(function () {
-
-                console.log('mouseover', model.name);
+            var tr = $("<tr></tr>").click(function () {
                 control.attach(model.group);
                 render();
             });
@@ -191,43 +228,56 @@
         evt.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
     }
 
-    function updateProgress(evt) {
-        console.log('progress');
-        console.log(Math.round((evt.loaded / evt.total) * 100));
-        if (evt.lengthComputable) {
-            var percentLoaded = Math.round((evt.loaded / evt.total) * 100);
-            if (percentLoaded < 100) {
-                progress.style.width = percentLoaded + '%';
-                progress.textContent = percentLoaded + '%';
-            }
-        }
-    }
-
     function onSuccess(evt, model) {
         var fileReader = evt.target;
         if (fileReader.error) return console.log("error onloadend!?");
-        progress.style.width = '100%';
-        progress.textContent = '100%';
-        setTimeout(function () {
-            $progress.removeClass('loading');
-        }, 2000);
         var parser = new window.DxfParser();
         var dxf = parser.parseSync(fileReader.result);
         var group = new THREE.Group();
-        var material = new THREE.LineBasicMaterial({
-            color: 0x0000ff
-        });
+
+
+        var z = 0;
 
         dxf.entities.forEach(function (entity) {
-            if (entity.type == "POLYLINE" || entity.type == "LINE") {
+
+            var material = new THREE.LineBasicMaterial({
+                color: '#' + Math.floor(Math.random() * 16777215).toString(16)
+            });
+
+            if (entity.type == "POLYLINE" || entity.type == "LINE" || entity.type == "LWPOLYLINE") {
                 var geometry = new THREE.Geometry();
+
                 entity.vertices.forEach(function (vertex) {
-                    geometry.vertices.push(new THREE.Vector3(vertex.x, vertex.y, 0));
+                    var key = vertex.x + "-" + vertex.y;
+                    if (importedShapes[key]) {
+//                        console.log('skip');
+//                        return;
+                    }
+
+                    importedShapes[key] = true;
+
+                    geometry.vertices.push(new THREE.Vector3(vertex.x, vertex.y, z += 0.0001));
                 });
                 var line = new THREE.Line(geometry, material);
                 group.add(line);
-            } else if (entity.type === 'CIRCLE' || entity.type === 'ARC') {
+            } else if (entity.type === 'ELLIPSE') {
 
+
+            } else if (entity.type === 'CIRCLE') {
+
+                console.log(entity);
+                var geometry = new THREE.CircleGeometry(entity.radius, 32, entity.startAngle, entity.angleLength);
+                geometry.vertices.shift();
+                circle = new THREE.Mesh(geometry, material);
+                circle.position.x = entity.center.x;
+                circle.position.y = entity.center.y;
+                circle.position.z = entity.center.z;
+
+                group.add(circle);
+
+            } else if (entity.type === 'ARC') {
+
+                console.log(entity);
                 var geometry = new THREE.CircleGeometry(entity.radius, 32, entity.startAngle, entity.angleLength);
                 geometry.vertices.shift();
                 circle = new THREE.Line(geometry, material);
@@ -235,54 +285,73 @@
                 circle.position.y = entity.center.y;
                 circle.position.z = entity.center.z;
                 group.add(circle);
-
             } else {
                 console.log(entity.type);
             }
         })
 
         scene.add(group);
-//
         model.group = group;
-
-        console.log(models);
-
         render();
     }
 
-    var camera, scene, renderer, control;
+    function readDirectory(dirEntry, callback) {
+        var dirReader = dirEntry.createReader();
+        var entries = [];
 
-    init();
+        // Call the reader.readEntries() until no more results are returned.
+        var readEntries = function () {
+            dirReader.readEntries (function (results) {
+
+                console.log(results);
+                if (results.length) {
+                    callback(results);
+                } else {
+
+                }
+            }, function () {
+
+            });
+        };
+
+        readEntries(); // Start reading dirs.
+    }
 
     function init() {
 
+        textarea = document.getElementById('g-code');
+        console.log(textarea);
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x999999);
-
         scene.add(new THREE.AmbientLight(0x999999));
 
         camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000);
         camera.position.set(345 / 2, 175 / 2, 200);
         scene.add(camera);
 
-//        var helper = new THREE.GridHelper(160, 10);
-//        helper.rotation.x = Math.PI / 2;
-//        scene.add(helper);
+        var helper = new THREE.GridHelper(345 * 2, 345 * 2);
+        helper.rotation.x = Math.PI / 2;
+        scene.add(helper);
 
 
-        var planeW = 345; // pixels
-        var planeH = 175; // pixels
-        var plane = new THREE.Mesh(
-//                new THREE.PlaneGeometry( planeW*numW, planeH*numH, planeW, planeH ),
-                new THREE.PlaneGeometry(planeW, planeH, (345 / 5), (175 / 5)),
-                new THREE.MeshBasicMaterial({
-                    color: 0x000000,
-                    wireframe: true
-                })
-        );
+        var geometry = new THREE.Geometry();
+        [
+            {x: 0, y: 0},
+            {x: 345, y: 0},
+            {x: 345, y: 175},
+            {x: 0, y: 175},
+            {x: 0, y: 0}
 
-        plane.position.set((planeW / 2), (planeH / 2), 0);
-        scene.add(plane);
+        ].forEach(function (vertex) {
+
+            geometry.vertices.push(new THREE.Vector3(vertex.x, vertex.y, 0));
+        });
+        var border = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+            color: '#ffffff'
+        }));
+        scene.add(border);
+//        var planeW = 345; // pixels
+//        var planeH = 175; // pixels
 
         renderer = new THREE.WebGLRenderer({antialias: true});
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -338,6 +407,52 @@
         window.addEventListener('resize', onWindowResize, false);
         render();
 
+
+        var dropZone = document.getElementById('dropzone');
+        dropZone.addEventListener('dragover', function (e) {
+            e.preventDefault(); // Necessary. Allows us to drop.
+        });
+
+        dropZone.addEventListener('dragenter', function (e) {
+            e.target.classList.add('active');
+        });
+
+        dropZone.addEventListener('dragleave', function (e) {
+            e.target.classList.remove('active');
+        });
+
+
+        dropZone.addEventListener('drop', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            var items = e.dataTransfer.items;
+            var files = e.dataTransfer.files;
+
+            console.log(files, items);
+
+            for (var i = 0, item; item = items[i]; ++i) {
+                // Skip this one if we didn't get a file.
+                if (item.kind != 'file') {
+                    continue;
+                }
+
+                var entry = item.webkitGetAsEntry();
+                if (entry.isDirectory) {
+
+                    readDirectory(entry, function (entries) {
+                        entries.forEach(function (file) {
+                            file.file(onFileSelected);
+                        })
+                    })
+                } else {
+                    onFileSelected(files[i])
+                }
+            }
+
+
+            setTimeout(updateModelsList, 1000);
+        });
     }
 
     function onWindowResize() {
@@ -356,6 +471,92 @@
         renderer.render(scene, camera);
 
     }
+
+    //    345
+    //    175
+
+
+    //    G1 X115.646 Y9.841 Z0.000
+    //    G1 X115.745 Y8.918 Z13.100
+
+
+    function exportGcode() {
+        textarea.value = "";
+        textarea.value += "G90\n";
+        textarea.value += "S100\n";
+        textarea.value += "F500\n";
+        textarea.value += "M3\n";
+        textarea.value += "G0 X0.000 Y0.000\n";
+        textarea.value += "G0 X345.000 Y0.000\n"; //->
+        textarea.value += "G0 X345.000 Y175.000\n";
+        textarea.value += "G0 X0.000 Y175.000\n";
+        textarea.value += "G0 X0.000 Y0.000\n";
+        textarea.value += "M5\n";
+
+        var normalMatrixWorld = new THREE.Matrix3();
+        var vector = new THREE.Vector3();
+
+
+        var z = 0;
+
+//        gcodeExporter[]
+
+        models.forEach(function (model) {
+
+            model.group.updateMatrixWorld();
+            console.log(model);
+
+            model.group.children.forEach(function (shape) {
+
+//                console.log(shape.geometry.type);
+
+
+                if (shape.geometry.type == "Geometry") {
+                    shape.geometry.vertices.forEach(function (vertex, index) {
+                        vector.copy(vertex).applyMatrix4(model.group.matrixWorld);
+                        if (index == 0) {
+                            textarea.value += "G0 X" + vector.x.toFixed(3) + " Y" + vector.y.toFixed(3) + " Z" + z.toFixed(3) + "\n"; //->
+                            textarea.value += "M3\n";
+                        } else {
+                            textarea.value += "G1 X" + vector.x.toFixed(3) + " Y" + vector.y.toFixed(3) + " Z" + z.toFixed(3) + "\n"; //->
+                        }
+//                        textarea.value += "G1 X"+vector.x.toFixed(3)+" Y"+vector.y.toFixed(3)+"\n"; //->
+                        //console.log(vertex, vector);
+                        //z += 0.1;
+                    })
+                    textarea.value += "M5\n";
+                } else if (shape.geometry.type == "CircleGeometry") {
+
+
+//                    var str = "";
+//                    var ofx = shape.center.x - shape.radius;
+//                    str += "G0 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " F" + settings.speed + " \n";
+//                    str += "M5\n";
+//                    str += "G17 G2 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " I" + shape.radius.toFixed(3) + " J0.000 F" + settings.workSpeed + " \n";
+//                    str += "M3\n";
+//                    return str;
+//
+
+                    console.log('a', shape.geometry)
+                    console.log('a', shape.geometry.boundingSphere)
+                    shape.geometry.scale(2, 2, 2);
+                    console.log('b', shape.geometry.boundingSphere)
+
+//                    vector.copy(shape.position).applyMatrix4(model.group.matrixWorld);
+//                    console.log(shape.geometry, shape.geometry.parameters.thetaStart, shape.geometry.parameters.thetaLength)
+//                    console.log(shape.geometry.toJSON())
+
+                    shape.geometry.vertices.forEach(function (vertex) {
+                        vector.copy(vertex).applyMatrix4(model.group.matrixWorld);
+                        //                      console.log(vertex, vector);
+                    })
+                }
+            });
+        });
+
+
+    }
+
 
 </script>
 </body>
