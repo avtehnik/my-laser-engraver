@@ -15,8 +15,8 @@
         #info {
             color: #fff;
             position: absolute;
-            top: 0px;
-            width: 300px;
+            background-color: #000000;
+            top: 20px;
             z-index: 100;
             display: block;
 
@@ -62,6 +62,7 @@
     <script src="https://threejs.org/build/three.js"></script>
     <script src="libs/js/three-dxf.js"></script>
     <script src="libs/js/dxf-parser.js"></script>
+    <script src="https://threejs.org/examples/js/utils/GeometryUtils.js"></script>
     <script src="https://threejs.org/examples/js/Detector.js"></script>
     <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
     <script src="https://threejs.org/examples/js/controls/TransformControls.js"></script>
@@ -93,41 +94,58 @@
 
     var camera, scene, renderer, control, textarea;
     var importedShapes = {};
+    var group, textMesh1, textMesh2, textGeo, materials;
+    var models = [];
+    var text = "#appshed",
+            height = 20,
+            size = 70,
+            hover = 30,
+            curveSegments = 4,
+            bevelThickness = 2,
+            bevelSize = 1.5,
+            bevelSegments = 3,
+            bevelEnabled = true,
+            font = undefined,
+            fontName = "droid", // helvetiker, optimer, gentilis, droid sans, droid serif
+            fontWeight = "sans_bold"; // normal bold
+    var mirror = true;
 
-    var gcodeExporter = {
-        'circle': function (shape, settings) {
-            var str = "";
-            var ofx = shape.center.x - shape.radius;
-            str += "G0 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " F" + settings.speed + " \n";
-            str += "M5\n";
-            str += "G17 G2 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " I" + shape.radius.toFixed(3) + " J0.000 F" + settings.workSpeed + " \n";
-            str += "M3\n";
-            return str;
-        },
-        'arc': function (shape, settings) {
-            var Theta1 = vectorAngle(shape.center, shape.from);
-            var I = (shape.center.x - (Math.abs(shape.radius) * Math.cos(Theta1 * Math.PI / 180))) - shape.center.x;
-            var J = (shape.center.y - (Math.abs(shape.radius) * Math.sin(Theta1 * Math.PI / 180))) - shape.center.y;
+    https://threejs.org/examples/fonts/droid/droid_sans_bold.typeface.json
 
-            var str = "";
-            str += "G0 X" + shape.from.x.toFixed(3) + " Y" + shape.from.y.toFixed(3) + " F" + settings.speed + " \n";
-            str += "M3\n";
-            str += (shape.radius > 0 ? "G3" : "G2") + " X" + shape.to.x.toFixed(3) + " Y" + shape.to.y.toFixed(3) + "  I" + I.toFixed(3) + " J" + J.toFixed(3) + "  F" + settings.workSpeed + " \n";
-            str += "M5\n";
-            return str;
+            var gcodeExporter = {
+                'circle': function (shape, settings) {
+                    var str = "";
+                    var ofx = shape.center.x - shape.radius;
+                    str += "G0 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " F" + settings.speed + " \n";
+                    str += "M5\n";
+                    str += "G17 G2 X" + ofx.toFixed(3) + " Y" + shape.center.y.toFixed(3) + " I" + shape.radius.toFixed(3) + " J0.000 F" + settings.workSpeed + " \n";
+                    str += "M3\n";
+                    return str;
+                },
+                'arc': function (shape, settings) {
+                    var Theta1 = vectorAngle(shape.center, shape.from);
+                    var I = (shape.center.x - (Math.abs(shape.radius) * Math.cos(Theta1 * Math.PI / 180))) - shape.center.x;
+                    var J = (shape.center.y - (Math.abs(shape.radius) * Math.sin(Theta1 * Math.PI / 180))) - shape.center.y;
+
+                    var str = "";
+                    str += "G0 X" + shape.from.x.toFixed(3) + " Y" + shape.from.y.toFixed(3) + " F" + settings.speed + " \n";
+                    str += "M3\n";
+                    str += (shape.radius > 0 ? "G3" : "G2") + " X" + shape.to.x.toFixed(3) + " Y" + shape.to.y.toFixed(3) + "  I" + I.toFixed(3) + " J" + J.toFixed(3) + "  F" + settings.workSpeed + " \n";
+                    str += "M5\n";
+                    return str;
 
 
-        },
-        'line': function (shape, settings) {
-            return "";
+                },
+                'line': function (shape, settings) {
+                    return "";
 
-            var x = point['2d_x'] + offsetX;
-            var y = point['2d_y'] + offsetY;
+                    var x = point['2d_x'] + offsetX;
+                    var y = point['2d_y'] + offsetY;
 
-            textarea.value += "G" + (index == 0 ? 0 : 1) + " X" + x.toFixed(3) + " Y" + y.toFixed(3) + "\r\n";
+                    textarea.value += "G" + (index == 0 ? 0 : 1) + " X" + x.toFixed(3) + " Y" + y.toFixed(3) + "\r\n";
 
-        }
-    };
+                }
+            };
 
 
     init();
@@ -143,7 +161,7 @@
 
     document.getElementById('dxf').addEventListener('change', onFilesSelected, false);
 
-    var models = [];
+
     var filesCount = 0;
 
     function onFileSelected(file) {
@@ -186,21 +204,16 @@
     function updateModelsList() {
 
         modelsTable.innerHTML = "";
-
-
         models.forEach(function (model) {
-
-            var tr = $("<tr></tr>").click(function () {
+            var tr = $("<tr></tr>");
+            tr.append($("<td></td>").text(model.name).click(function () {
                 control.attach(model.group);
                 render();
-            });
-            tr.append($("<td></td>").text(model.name));
-            var deleteBtn = $("<tr>x</tr>");
+            }));
+            var deleteBtn = $("<input type='checkbox'/>");
             tr.append(deleteBtn);
             $(modelsTable).append(tr);
-
         })
-
     }
 
     function abortUpload() {
@@ -228,6 +241,20 @@
         evt.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
     }
 
+
+    function createText(text) {
+        var group = new THREE.Group();
+        var model = {
+            group: group,
+            name: 'text',
+        };
+        scene.add(group);
+        models.push(model);
+        updateModelsList()
+
+        loadFontShapes(text, model);
+    }
+
     function onSuccess(evt, model) {
         var fileReader = evt.target;
         if (fileReader.error) return console.log("error onloadend!?");
@@ -236,12 +263,58 @@
         var group = new THREE.Group();
 
 
+        console.log(dxf);
         var z = 0;
+
+
+        var minX = null, maxX = null, minY = null, maxY = null, size;
+
+        dxf.entities.forEach(function (entity) {
+            entity.vertices.forEach(function (vertex) {
+
+
+                if (minX === null) {
+                    minX = vertex.x;
+                    maxX = vertex.x;
+                }
+
+                if (minY === null) {
+                    minY = vertex.y;
+                    maxY = vertex.y;
+                }
+
+                if (vertex.x > maxX) {
+                    maxX = vertex.x;
+                }
+
+                if (vertex.y > maxY) {
+                    maxY = vertex.y;
+                }
+
+                if (vertex.x < minX) {
+                    minX = vertex.x;
+                }
+
+                if (vertex.y < minY) {
+                    minY = vertex.y;
+                }
+
+                var key = vertex.x + "-" + vertex.y;
+            });
+        })
+
+
+        size = Math.max(maxX - minX, maxY - minY);
+        var avrgX = (maxX - minX) / 2;
+        var avrgY = (maxY - minY) / 2;
+        console.log(minX, maxX, (maxX - minX), minY, maxY, (maxY - minY), size);
+
 
         dxf.entities.forEach(function (entity) {
 
             var material = new THREE.LineBasicMaterial({
-                color: '#' + Math.floor(Math.random() * 16777215).toString(16)
+//                color: '#' + Math.floor(Math.random() * 16777215).toString(16)
+                color: '#0000ff'
             });
 
             if (entity.type == "POLYLINE" || entity.type == "LINE" || entity.type == "LWPOLYLINE") {
@@ -256,7 +329,7 @@
 
                     importedShapes[key] = true;
 
-                    geometry.vertices.push(new THREE.Vector3(vertex.x, vertex.y, z += 0.0001));
+                    geometry.vertices.push(new THREE.Vector3(vertex.x - avrgX, (vertex.y - avrgY), z += 0.0001));
                 });
                 var line = new THREE.Line(geometry, material);
                 group.add(line);
@@ -269,8 +342,8 @@
                 var geometry = new THREE.CircleGeometry(entity.radius, 32, entity.startAngle, entity.angleLength);
                 geometry.vertices.shift();
                 circle = new THREE.Mesh(geometry, material);
-                circle.position.x = entity.center.x;
-                circle.position.y = entity.center.y;
+                circle.position.x = (entity.center.x - avrgX);
+                circle.position.y = (entity.center.y - avrgY);
                 circle.position.z = entity.center.z;
 
                 group.add(circle);
@@ -281,19 +354,56 @@
                 var geometry = new THREE.CircleGeometry(entity.radius, 32, entity.startAngle, entity.angleLength);
                 geometry.vertices.shift();
                 circle = new THREE.Line(geometry, material);
-                circle.position.x = entity.center.x;
-                circle.position.y = entity.center.y;
+                circle.position.x = (entity.center.x - avrgX);
+                circle.position.y = (entity.center.y - avrgY);
                 circle.position.z = entity.center.z;
                 group.add(circle);
             } else {
                 console.log(entity.type);
             }
         })
-
         scene.add(group);
         model.group = group;
+        control.attach(group);
         render();
     }
+
+
+    function loadFontShapes(text, model) {
+
+        var shapes = font.generateShapes(text, 3, 1)
+        var group = new THREE.Group();
+        shapes.forEach(function (shape) {
+            console.log(shape);
+            shape.curves.forEach(function (curve) {
+                var points = curve.getPoints(5);
+                var geometry = new THREE.Geometry();
+                points.forEach(function (vertex) {
+                    geometry.vertices.push(new THREE.Vector3(vertex.x * 10, (vertex.y * 10), 0));
+                });
+                var material = new THREE.LineBasicMaterial({color: 0xff0000});
+                var curveObject = new THREE.Line(geometry, material);
+                group.add(curveObject);
+            })
+            shape.holes.forEach(function (curve) {
+                var points = curve.getPoints(5);
+                var geometry = new THREE.Geometry();
+                points.forEach(function (vertex) {
+                    geometry.vertices.push(new THREE.Vector3(vertex.x * 10, (vertex.y * 10), 0));
+                });
+                var material = new THREE.LineBasicMaterial({color: 0xff0000});
+                var curveObject = new THREE.Line(geometry, material);
+                group.add(curveObject);
+            })
+
+
+        });
+
+        scene.add(group);
+        control.attach(group);
+        model.group = group;
+    }
+
 
     function readDirectory(dirEntry, callback) {
         var dirReader = dirEntry.createReader();
@@ -317,174 +427,230 @@
         readEntries(); // Start reading dirs.
     }
 
-    function init() {
-
-        textarea = document.getElementById('g-code');
-        console.log(textarea);
-        scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x999999);
-        scene.add(new THREE.AmbientLight(0x999999));
-
-        camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000);
-        camera.position.set(345 / 2, 175 / 2, 200);
-        scene.add(camera);
-
-        var helper = new THREE.GridHelper(345 * 2, 345 * 2);
-        helper.rotation.x = Math.PI / 2;
-        scene.add(helper);
-
-
+    function addLine(x1, y1, x2, y2) {
         var geometry = new THREE.Geometry();
         [
-            {x: 0, y: 0},
-            {x: 345, y: 0},
-            {x: 345, y: 175},
-            {x: 0, y: 175},
-            {x: 0, y: 0}
-
+            {x: x1, y: y1},
+            {x: x2, y: y2},
         ].forEach(function (vertex) {
 
             geometry.vertices.push(new THREE.Vector3(vertex.x, vertex.y, 0));
         });
         var border = new THREE.Line(geometry, new THREE.LineBasicMaterial({
-            color: '#ffffff'
+            color: ((((x1 % 50 == 0) && y1 == 0) || ((y1 % 50 == 0) && x1 == 0)) ? '#00B3FF' : '#B3B3B3')
         }));
         scene.add(border);
+
+    }
+    function loadFont(cb) {
+
+        var fontNames;
+//        fontNames = 'fonts/helvetiker_regular.typeface.json';
+//        fontNames = 'fonts/Fridayluck_Regular.json';
+        fontNames = 'fonts/' + fontName + '_' + fontWeight + '.typeface.json';
+
+        var loader = new THREE.FontLoader();
+//        loader.load('fonts/Fridayluck_Regular.json', function (response) {
+            loader.load(fontNames, function (response) {
+                font = response;
+                cb();
+            });
+    }
+
+
+        function init() {
+            THREE.Cache.enabled = true;
+            textarea = document.getElementById('g-code');
+            console.log(textarea);
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x999999);
+            scene.add(new THREE.AmbientLight(0x999999));
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.set(345 / 2, 175 / 2, 200);
+            scene.add(camera);
+
+//        var helper = new THREE.GridHelper(345 * 2, 345 * 2);
+//        helper.rotation.x = Math.PI / 2;
+//        scene.add(helper);
+
+
+            var geometry = new THREE.Geometry();
+            [
+                {x: 0, y: 0},
+                {x: 345, y: 0},
+                {x: 345, y: 175},
+                {x: 0, y: 175},
+                {x: 0, y: 0}
+
+            ].forEach(function (vertex) {
+
+                geometry.vertices.push(new THREE.Vector3(vertex.x, vertex.y, 0));
+            });
+            var border = new THREE.Line(geometry, new THREE.LineBasicMaterial({
+                color: '#ffffff'
+            }));
+            scene.add(border);
+
+
+            var horizontalSize = 344;
+            var verticalSize = 174;
+            while (horizontalSize) {
+                if (horizontalSize % 10 == 0) {
+                    addLine(horizontalSize, 0, horizontalSize, 175)
+                }
+                horizontalSize--;
+            }
+            while (verticalSize) {
+                if (verticalSize % 10 == 0) {
+                    addLine(0, verticalSize, 345, verticalSize)
+                }
+                verticalSize--;
+            }
+
+
 //        var planeW = 345; // pixels
 //        var planeH = 175; // pixels
 
-        renderer = new THREE.WebGLRenderer({antialias: true});
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-        var controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.addEventListener('change', render);
-        controls.target.set(0, 1.2, 2);
-        controls.target.x = camera.position.x;
-        controls.target.y = camera.position.y;
-        controls.update();
+            renderer = new THREE.WebGLRenderer({antialias: true});
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            var controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.addEventListener('change', render);
+            controls.target.set(0, 1.2, 2);
+            controls.target.x = camera.position.x;
+            controls.target.y = camera.position.y;
+            controls.update();
 
-        control = new THREE.TransformControls(camera, renderer.domElement);
-        control.addEventListener('change', render);
-        scene.add(control);
-        window.addEventListener('keydown', function (event) {
-            switch (event.keyCode) {
-                case 81: // Q
-                    control.setSpace(control.space === "local" ? "world" : "local");
-                    break;
-                case 17: // Ctrl
-                    control.setTranslationSnap(100);
-                    control.setRotationSnap(THREE.Math.degToRad(15));
-                    break;
-                case 87: // W
-                    control.setMode("translate");
-                    break;
-                case 69: // E
-                    control.setMode("rotate");
-                    break;
-                case 82: // R
-                    control.setMode("scale");
-                    break;
-                case 187:
-                case 107: // +, =, num+
-                    control.setSize(control.size + 0.1);
-                    break;
-                case 189:
-                case 109: // -, _, num-
-                    control.setSize(Math.max(control.size - 0.1, 0.1));
-                    break;
-            }
-        });
-        window.addEventListener('keyup', function (event) {
-            switch (event.keyCode) {
-                case 17: // Ctrl
-                    control.setTranslationSnap(null);
-                    control.setRotationSnap(null);
-                    break;
-            }
-        });
-
-        window.addEventListener('resize', onWindowResize, false);
-        render();
-
-
-        var dropZone = document.getElementById('dropzone');
-        dropZone.addEventListener('dragover', function (e) {
-            e.preventDefault(); // Necessary. Allows us to drop.
-        });
-
-        dropZone.addEventListener('dragenter', function (e) {
-            e.target.classList.add('active');
-        });
-
-        dropZone.addEventListener('dragleave', function (e) {
-            e.target.classList.remove('active');
-        });
-
-
-        dropZone.addEventListener('drop', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-
-            var items = e.dataTransfer.items;
-            var files = e.dataTransfer.files;
-
-            console.log(files, items);
-
-            for (var i = 0, item; item = items[i]; ++i) {
-                // Skip this one if we didn't get a file.
-                if (item.kind != 'file') {
-                    continue;
+            control = new THREE.TransformControls(camera, renderer.domElement);
+            control.addEventListener('change', render);
+            scene.add(control);
+            window.addEventListener('keydown', function (event) {
+                switch (event.keyCode) {
+                    case 81: // Q
+                        control.setSpace(control.space === "local" ? "world" : "local");
+                        break;
+                    case 17: // Ctrl
+                        control.setTranslationSnap(100);
+                        control.setRotationSnap(THREE.Math.degToRad(15));
+                        break;
+                    case 87: // W
+                        control.setMode("translate");
+                        break;
+                    case 69: // E
+                        control.setMode("rotate");
+                        break;
+                    case 82: // R
+                        control.setMode("scale");
+                        break;
+                    case 187:
+                    case 107: // +, =, num+
+                        control.setSize(control.size + 0.1);
+                        break;
+                    case 189:
+                    case 109: // -, _, num-
+                        control.setSize(Math.max(control.size - 0.1, 0.1));
+                        break;
                 }
+            });
+            window.addEventListener('keyup', function (event) {
+                switch (event.keyCode) {
+                    case 17: // Ctrl
+                        control.setTranslationSnap(null);
+                        control.setRotationSnap(null);
+                        break;
+                }
+            });
 
-                var entry = item.webkitGetAsEntry();
-                if (entry.isDirectory) {
+            window.addEventListener('resize', onWindowResize, false);
+            render();
 
-                    readDirectory(entry, function (entries) {
-                        entries.forEach(function (file) {
-                            file.file(onFileSelected);
+
+            var dropZone = document.getElementById('dropzone');
+            dropZone.addEventListener('dragover', function (e) {
+                e.preventDefault(); // Necessary. Allows us to drop.
+            });
+
+            dropZone.addEventListener('dragenter', function (e) {
+                e.target.classList.add('active');
+            });
+
+            dropZone.addEventListener('dragleave', function (e) {
+                e.target.classList.remove('active');
+            });
+
+
+            dropZone.addEventListener('drop', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                var items = e.dataTransfer.items;
+                var files = e.dataTransfer.files;
+
+                console.log(files, items);
+
+                for (var i = 0, item; item = items[i]; ++i) {
+                    // Skip this one if we didn't get a file.
+                    if (item.kind != 'file') {
+                        continue;
+                    }
+
+                    var entry = item.webkitGetAsEntry();
+                    if (entry.isDirectory) {
+
+                        readDirectory(entry, function (entries) {
+                            entries.forEach(function (file) {
+                                file.file(onFileSelected);
+                            })
                         })
-                    })
-                } else {
-                    onFileSelected(files[i])
+                    } else {
+                        onFileSelected(files[i])
+                    }
                 }
-            }
 
 
-            setTimeout(updateModelsList, 1000);
-        });
-    }
+                setTimeout(updateModelsList, 1000);
+            });
 
-    function onWindowResize() {
+            loadFont(function () {
+//                createText("Не");
+//                createText("викидуй");
+//                createText("кришечки");
+                render();
+            });
+        }
 
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
+        function onWindowResize() {
 
-        renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
 
-        render();
+            renderer.setSize(window.innerWidth, window.innerHeight);
 
-    }
+            render();
 
-    function render() {
+        }
 
-        renderer.render(scene, camera);
+        function render() {
 
-    }
+            renderer.render(scene, camera);
 
-    //    345
-    //    175
+        }
 
-
-    //    G1 X115.646 Y9.841 Z0.000
-    //    G1 X115.745 Y8.918 Z13.100
+        //    345
+        //    175
 
 
-    function exportGcode() {
-        textarea.value = "";
-        textarea.value += "G90\n";
-        textarea.value += "S100\n";
-        textarea.value += "F500\n";
+        //    G1 X115.646 Y9.841 Z0.000
+        //    G1 X115.745 Y8.918 Z13.100
+
+
+        function exportGcode() {
+            textarea.value = "";
+            textarea.value += "G90\n";
+            textarea.value += "S100\n";
+            textarea.value += "F500\n";
 //        textarea.value += "M3\n";
 //        textarea.value += "G0 X0.000 Y0.000\n";
 //        textarea.value += "G0 X345.000 Y0.000\n"; //->
@@ -493,39 +659,39 @@
 //        textarea.value += "G0 X0.000 Y0.000\n";
 //        textarea.value += "M5\n";
 
-        var normalMatrixWorld = new THREE.Matrix3();
-        var vector = new THREE.Vector3();
+            var normalMatrixWorld = new THREE.Matrix3();
+            var vector = new THREE.Vector3();
 
 
-        var z = 0;
+            var z = 0;
 
 //        gcodeExporter[]
 
-        models.forEach(function (model) {
+            models.forEach(function (model) {
 
-            model.group.updateMatrixWorld();
-            console.log(model);
+                model.group.updateMatrixWorld();
+                console.log(model);
 
-            model.group.children.forEach(function (shape) {
+                model.group.children.forEach(function (shape) {
 
 //                console.log(shape.geometry.type);
 
 
-                if (shape.geometry.type == "Geometry") {
-                    shape.geometry.vertices.forEach(function (vertex, index) {
-                        vector.copy(vertex).applyMatrix4(model.group.matrixWorld);
-                        if (index == 0) {
-                            textarea.value += "G0 X" + vector.x.toFixed(3) + " Y" + vector.y.toFixed(3) + " Z" + z.toFixed(3) + "\n"; //->
-                            textarea.value += "M3\n";
-                        } else {
-                            textarea.value += "G1 X" + vector.x.toFixed(3) + " Y" + vector.y.toFixed(3) + " Z" + z.toFixed(3) + "\n"; //->
-                        }
+                    if (shape.geometry.type == "Geometry" || shape.geometry.type == "TextGeometry") {
+                        shape.geometry.vertices.forEach(function (vertex, index) {
+                            vector.copy(vertex).applyMatrix4(model.group.matrixWorld);
+                            if (index == 0) {
+                                textarea.value += "G0 X" + vector.x.toFixed(3) + " Y" + vector.y.toFixed(3) + " Z" + z.toFixed(3) + "\n"; //->
+                                textarea.value += "M3\n";
+                            } else {
+                                textarea.value += "G1 X" + vector.x.toFixed(3) + " Y" + vector.y.toFixed(3) + " Z" + z.toFixed(3) + "\n"; //->
+                            }
 //                        textarea.value += "G1 X"+vector.x.toFixed(3)+" Y"+vector.y.toFixed(3)+"\n"; //->
-                        //console.log(vertex, vector);
-                        //z += 0.1;
-                    })
-                    textarea.value += "M5\n";
-                } else if (shape.geometry.type == "CircleGeometry") {
+                            //console.log(vertex, vector);
+                            //z += 0.1;
+                        })
+                        textarea.value += "M5\n";
+                    } else if (shape.geometry.type == "CircleGeometry") {
 
 
 //                    var str = "";
@@ -537,25 +703,25 @@
 //                    return str;
 //
 
-                    console.log('a', shape.geometry)
-                    console.log('a', shape.geometry.boundingSphere)
-                    shape.geometry.scale(2, 2, 2);
-                    console.log('b', shape.geometry.boundingSphere)
+                        console.log('a', shape.geometry)
+                        console.log('a', shape.geometry.boundingSphere)
+                        shape.geometry.scale(2, 2, 2);
+                        console.log('b', shape.geometry.boundingSphere)
 
 //                    vector.copy(shape.position).applyMatrix4(model.group.matrixWorld);
 //                    console.log(shape.geometry, shape.geometry.parameters.thetaStart, shape.geometry.parameters.thetaLength)
 //                    console.log(shape.geometry.toJSON())
 
-                    shape.geometry.vertices.forEach(function (vertex) {
-                        vector.copy(vertex).applyMatrix4(model.group.matrixWorld);
-                        //                      console.log(vertex, vector);
-                    })
-                }
+                        shape.geometry.vertices.forEach(function (vertex) {
+                            vector.copy(vertex).applyMatrix4(model.group.matrixWorld);
+                            //                      console.log(vertex, vector);
+                        })
+                    }
+                });
             });
-        });
 
 
-    }
+        }
 
 
 </script>
